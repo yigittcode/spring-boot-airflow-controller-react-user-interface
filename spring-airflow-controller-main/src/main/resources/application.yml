@@ -1,0 +1,94 @@
+spring:
+  application:
+    name: airflow_spring_rest_controller
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+      write-dates-with-zone-id: false
+    time-zone: UTC
+  # Keycloak ve Security konfigürasyonu
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:8082/realms/airflow-realm
+          jwk-set-uri: http://localhost:8082/realms/airflow-realm/protocol/openid-connect/certs
+  # WebFlux yapılandırması
+  main:
+    web-application-type: reactive
+    allow-bean-definition-overriding: true
+  # R2DBC PostgreSQL yapılandırması
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/airflow_db_keycloack
+    username: ${R2DBC_USERNAME}
+    password: ${R2DBC_PASSWORD}
+  # SQL script initialization
+  sql:
+    init:
+      mode: never
+      schema-locations: classpath:db/schema.sql
+      continue-on-error: true
+
+# Logging configuration to reduce verbosity
+logging:
+  level:
+    root: WARN
+    com.yigit.airflow_spring_rest_controller: INFO
+    # Reduce specific logger verbosity 
+    com.yigit.airflow_spring_rest_controller.service.KeycloakService: WARN
+    # Synchronization service logs
+    com.yigit.airflow_spring_rest_controller.service.synchronization: INFO
+    reactor.netty: ERROR
+    org.springframework.web.reactive.function.client: ERROR
+    io.netty: ERROR
+  # Suppress stack traces in logs
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{36} - %msg%n"
+
+server:
+  port: 8008
+
+# Airflow API Configuration
+airflow:
+  api:
+    base-url: http://localhost:8080
+    username: ${AIRFLOW_API_USERNAME}
+    password: ${AIRFLOW_API_PASSWORD}
+
+# Keycloak Configuration
+keycloak:
+  realm: airflow-realm
+  auth-server-url: http://localhost:8082
+  resource: airflow-client
+  credentials:
+    secret: ${KEYCLOAK_CLIENT_SECRET}
+  # User Synchronization Configuration
+  sync:
+    interval: 900000  # 15 minutes in milliseconds
+    initial-delay: 60000  # 1 minute in milliseconds
+    admin:
+      username: admin
+      password: admin123
+    endpoints:
+      token: /realms/master/protocol/openid-connect/token
+      users: /admin/realms/airflow-realm/users
+
+# Swagger UI Configuration
+springdoc:
+  swagger-ui:
+    enabled: true
+    config-url: /v3/api-docs/swagger-config
+    url: /v3/api-docs
+    operations-sorter: method
+    tags-sorter: alpha
+    doc-expansion: none
+    disable-swagger-default-url: true
+  api-docs:
+    enabled: true
+    groups:
+      enabled: true
+  webjars:
+    prefix: /webjars
+  enable-native-support: true
+  show-actuator: false
+  use-management-port: false 

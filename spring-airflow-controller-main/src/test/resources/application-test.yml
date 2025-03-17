@@ -1,0 +1,14 @@
+spring:
+  r2dbc:
+    url: r2dbc:h2:mem:///test;DB_CLOSE_DELAY=-1
+    username: sa
+    password: 
+  sql:
+    init:
+      mode: embedded
+      schema-locations: classpath:db/schema.sql
+
+logging:
+  level:
+    org.springframework.r2dbc: DEBUG
+    com.yigit.airflow_spring_rest_controller: DEBUG 
