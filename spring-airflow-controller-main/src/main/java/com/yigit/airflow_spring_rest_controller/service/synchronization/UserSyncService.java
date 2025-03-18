@@ -26,38 +26,38 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Service
 public class UserSyncService {
     private static final Logger log = LoggerFactory.getLogger(UserSyncService.class);
-    
+
     private final String tokenEndpoint;
     private final String usersEndpoint;
     private final String adminUsername;
     private final String adminPassword;
-    
+
     private final WebClient webClient;
     private final UserRepository userRepository;
     private final R2dbcEntityTemplate entityTemplate;
-    
+
     @Autowired
     public UserSyncService(
-            UserRepository userRepository, 
+            UserRepository userRepository,
             R2dbcEntityTemplate entityTemplate,
             @Value("${keycloak.auth-server-url}") String keycloakBaseUrl,
             @Value("${keycloak.sync.endpoints.token}") String tokenEndpoint,
             @Value("${keycloak.sync.endpoints.users}") String usersEndpoint,
             @Value("${keycloak.sync.admin.username}") String adminUsername,
             @Value("${keycloak.sync.admin.password}") String adminPassword) {
-        
+
         this.userRepository = userRepository;
         this.entityTemplate = entityTemplate;
         this.tokenEndpoint = tokenEndpoint;
         this.usersEndpoint = usersEndpoint;
         this.adminUsername = adminUsername;
         this.adminPassword = adminPassword;
-        
+
         this.webClient = WebClient.builder()
                 .baseUrl(keycloakBaseUrl)
                 .build();
     }
-    
+
     /**
      * Synchronizes users from Keycloak to the local database
      * 
@@ -65,21 +65,22 @@ public class UserSyncService {
      */
     public Mono<Integer> syncUsers() {
         log.info("Starting Keycloak user synchronization");
-        
+
         // Track counts of new and skipped users
         AtomicInteger newUsersCount = new AtomicInteger(0);
         AtomicInteger skippedUsersCount = new AtomicInteger(0);
-        
+
         return getAdminToken()
                 .flatMapMany(this::getUsersFromKeycloak)
                 .flatMap(user -> saveUserToDatabase(user, newUsersCount, skippedUsersCount))
                 .collectList()
                 .map(List::size)
-                .doOnSuccess(count -> log.info("Successfully synchronized {} users from Keycloak (New: {}, Skipped: {})", 
-                        count, newUsersCount.get(), skippedUsersCount.get()))
+                .doOnSuccess(
+                        count -> log.info("Successfully synchronized {} users from Keycloak (New: {}, Skipped: {})",
+                                count, newUsersCount.get(), skippedUsersCount.get()))
                 .doOnError(error -> log.error("Error synchronizing users from Keycloak", error));
     }
-    
+
     /**
      * Gets an admin token from Keycloak
      * 
@@ -87,13 +88,13 @@ public class UserSyncService {
      */
     private Mono<String> getAdminToken() {
         log.debug("Getting admin token from Keycloak");
-        
+
         MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
         formData.add("grant_type", "password");
         formData.add("client_id", "admin-cli");
         formData.add("username", adminUsername);
         formData.add("password", adminPassword);
-        
+
         return webClient.post()
                 .uri(tokenEndpoint)
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
@@ -104,7 +105,7 @@ public class UserSyncService {
                 .doOnSuccess(token -> log.debug("Successfully obtained admin token"))
                 .doOnError(error -> log.error("Error getting admin token", error));
     }
-    
+
     /**
      * Gets users from Keycloak using the admin token
      * 
@@ -113,7 +114,7 @@ public class UserSyncService {
      */
     private Flux<User> getUsersFromKeycloak(String adminToken) {
         log.debug("Getting users from Keycloak");
-        
+
         return webClient.get()
                 .uri(usersEndpoint)
                 .header("Authorization", "Bearer " + adminToken)
@@ -123,7 +124,7 @@ public class UserSyncService {
                 .doOnComplete(() -> log.debug("Successfully retrieved users from Keycloak"))
                 .doOnError(error -> log.error("Error getting users from Keycloak", error));
     }
-    
+
     /**
      * Maps a Keycloak user JSON to a User entity
      * 
@@ -143,36 +144,38 @@ public class UserSyncService {
                 .email((String) userMap.get("email"))
                 .build();
     }
-    
+
     /**
      * Saves a user to the database only if it doesn't already exist
      * No updates are performed on existing users
      * 
-     * @param user the user to save
-     * @param newUsersCount counter for new users
+     * @param user              the user to save
+     * @param newUsersCount     counter for new users
      * @param skippedUsersCount counter for skipped users
      * @return Mono<User> the saved user or existing user
      */
     private Mono<User> saveUserToDatabase(User user, AtomicInteger newUsersCount, AtomicInteger skippedUsersCount) {
         log.debug("Processing user for database: {}", user.getUsername());
-        
+
         // First check if the user already exists
         return userRepository.findById(user.getId())
-            .flatMap(existingUser -> {
-                // User already exists, do nothing
-                log.info("SKIP: User '{}' (id: {}) already exists, skipping", user.getUsername(), user.getId());
-                skippedUsersCount.incrementAndGet();
-                return Mono.just(user);
-            })
-            .switchIfEmpty(Mono.defer(() -> {
-                // Insert new user with entityTemplate
-                log.info("INSERT: Adding new user '{}' (id: {})", user.getUsername(), user.getId());
-                return userRepository.save(user)
-                    .doOnSuccess(savedUser -> {
-                        log.info("SUCCESS: Added user '{}' to database", savedUser.getUsername());
-                        newUsersCount.incrementAndGet();
-                    })
-                    .doOnError(error -> log.error("ERROR: Failed to insert user {}: {}", user.getUsername(), error.getMessage()));
-            }));
+                .flatMap(existingUser -> {
+                    // User already exists, do nothing
+                    log.info("SKIP: User '{}' (id: {}) already exists, skipping", user.getUsername(), user.getId());
+                    skippedUsersCount.incrementAndGet();
+                    return Mono.just(user);
+                })
+                .switchIfEmpty(Mono.defer(() -> {
+                    // INSERT NEW USER with entityTemplate.insert() instead of userRepository.save()
+                    log.info("INSERT: Adding new user '{}' (id: {})", user.getUsername(), user.getId());
+                    return entityTemplate.insert(User.class)
+                            .using(user)
+                            .doOnSuccess(savedUser -> {
+                                log.info("SUCCESS: Added user '{}' to database", savedUser.getUsername());
+                                newUsersCount.incrementAndGet();
+                            })
+                            .doOnError(error -> log.error("ERROR: Failed to insert user {}: {}", user.getUsername(),
+                                    error.getMessage()));
+                }));
     }
-} 
+}
